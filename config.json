@@ -1,0 +1,36 @@
+{
+  "backup_dir": "/opt/wp-backups",
+  "retention_days": 30,
+  "log_level": "INFO",
+  "log_file": "/var/log/wp-backup.log",
+  "sites": [
+    {
+      "name": "example-com",
+      "description": "Main company website",
+      "ssh_host": "your-server.example.com",
+      "ssh_port": 22,
+      "ssh_user": "username",
+      "ssh_key": "~/.ssh/wp-backup-key",
+      "web_root": "/var/www/html",
+      "wp_config_path": "/var/www/html/wp-config.php",
+      "retention_days": 60,
+      "exclude_patterns": [
+        "*.log",
+        "wp-content/cache/*",
+        "wp-content/backup*/*"
+      ]
+    },
+    {
+      "name": "blog-example-net",
+      "description": "Personal blog",
+      "ssh_host": "blog-server.example.net",
+      "ssh_user": "bloguser",
+      "ssh_key": "~/.ssh/wp-backup-key",
+      "web_root": "/var/www/blog",
+      "exclude_patterns": [
+        "wp-content/uploads/backup-*/*",
+        "wp-content/cache/*"
+      ]
+    }
+  ]
+}

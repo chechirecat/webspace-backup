@@ -12,9 +12,14 @@
 
 ### Required Python Packages
 ```
-paramiko>=2.7.0          # SSH client library
-pyyaml>=5.4.0           # YAML configuration support (optional)
-cryptography>=3.4.0     # SSH key handling
+paramiko>=3.4.0          # SSH client library
+cryptography>=41.0.0     # SSH key handling (required by paramiko)
+```
+
+### Optional Dependencies
+```
+# For future enhancements
+pyyaml>=6.0              # YAML configuration support
 ```
 
 ### System Dependencies
@@ -47,15 +52,6 @@ ssh                     # SSH client
       "wp_config_path": "/var/www/html/wp-config.php",
       "retention_days": 60,
       "exclude_patterns": ["*.log", "wp-content/cache/*"]
-    },
-    {
-      "name": "shop-example-net",
-      "description": "E-commerce site",
-      "ssh_host": "server2.provider.com", 
-      "ssh_user": "user2",
-      "ssh_key": "~/.ssh/wp-backup-key",
-      "web_root": "/var/www/shop",
-      "exclude_patterns": ["wp-content/uploads/wc-logs/*"]
     }
   ]
 }
@@ -64,13 +60,106 @@ ssh                     # SSH client
 ### Configuration Field Definitions
 - **backup_dir**: Local directory for storing backup archives
 - **retention_days**: Global default for cleanup (can be overridden per site)
-- **sites[].name**: Unique identifier used in archive filenames
+- **log_level**: Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- **log_file**: Path to log file (will be created if doesn't exist)
+- **sites[].name**: Unique identifier used in archive filenames (filesystem-safe)
+- **sites[].description**: Human-readable description (optional)
 - **sites[].ssh_***: SSH connection parameters
 - **sites[].web_root**: WordPress installation directory
 - **sites[].wp_config_path**: Path to wp-config.php (defaults to web_root/wp-config.php)
 - **sites[].exclude_patterns**: rsync exclusion patterns for files
+- **sites[].retention_days**: Site-specific retention (overrides global)
 
-### SSH Key Configuration
+### Configuration Validation
+The system validates:
+- Required fields presence and types
+- Site names are filesystem-safe (letters, numbers, hyphens, underscores, dots)
+- SSH port ranges (1-65535)
+- Retention days are positive integers
+- SSH key file existence and permissions
+- Backup directory write access
+
+## Command Line Interface
+
+### Main Script: `wp-backup.py`
+
+```bash
+# Basic usage
+python wp-backup.py [OPTIONS]
+
+# Available options:
+--config, -c PATH        # Configuration file path (default: config.json)
+--site, -s NAME          # Backup specific site only
+--dry-run, -n            # Test without performing backup
+--summary                # Show backup statistics
+--validate               # Validate configuration only
+--verbose, -v            # Increase verbosity (-v, -vv, -vvv)
+--quiet, -q              # Suppress output except errors
+--help, -h               # Show help message
+```
+
+### Usage Examples
+
+```bash
+# Validate configuration
+python wp-backup.py --validate
+
+# Test all sites without backing up
+python wp-backup.py --dry-run
+
+# Backup all configured sites
+python wp-backup.py
+
+# Backup only specific site
+python wp-backup.py --site example-com
+
+# Show backup statistics
+python wp-backup.py --summary
+
+# Use custom config file with verbose output
+python wp-backup.py --config /path/to/config.json --verbose
+
+# Quiet mode (errors only)
+python wp-backup.py --quiet
+```
+
+### Exit Codes
+- `0`: Success
+- `1`: General error (configuration, backup failure)
+- `130`: Interrupted by user (Ctrl+C)
+
+### Output Format
+
+**Normal operation:**
+```
+INFO: Starting backup process for 2 site(s)
+INFO: Processing site: example-com
+INFO: SSH connection successful to server1.provider.com
+INFO: Creating database backup for example-com
+INFO: Starting file synchronization for example-com
+INFO: Creating and verifying backup archives for example-com
+INFO: Backup completed successfully for example-com
+INFO: Backup process completed: 2/2 sites successful
+```
+
+**Summary output:**
+```
+Backup Summary
+==================================================
+Total sites: 2
+Total backups: 12
+Total size: 245.3 MB
+
+Site: example-com
+  Backups: 8
+  Size: 156.7 MB
+  Latest: 2024-12-14_10-30-15
+
+Site: blog-site
+  Backups: 4
+  Size: 88.6 MB
+  Latest: 2024-12-13_22-15-30
+```
 ```bash
 # Generate SSH key pair for backup operations
 ssh-keygen -t ed25519 -f ~/.ssh/wp-backup-key -C "wp-backup-tool"
@@ -576,7 +665,84 @@ class ConfigurationError(BackupError):
 - Use appropriate compression algorithms
 - Monitor disk space before backup operations
 
-### Retention Policy Implementation
+## Logging and Monitoring
+
+### Log Levels and Output
+
+```python
+# Log levels (set in config.json)
+DEBUG    # Detailed debugging info, command outputs
+INFO     # General operational messages (default)
+WARNING  # Non-fatal issues, missing optional fields
+ERROR    # Errors that don't stop the process
+CRITICAL # Fatal errors that stop execution
+```
+
+### Log File Format
+
+```
+2024-12-14 10:30:15 - wp-backup - INFO - Starting backup process for 2 site(s)
+2024-12-14 10:30:15 - wp-backup - INFO - Processing site: example-com
+2024-12-14 10:30:16 - ssh_client - INFO - SSH connection successful to server1.provider.com
+2024-12-14 10:30:17 - backup_controller - INFO - Creating database backup for example-com
+2024-12-14 10:30:25 - ssh_client - INFO - Database dump completed: /tmp/example-com_db.sql
+2024-12-14 10:30:26 - backup_controller - INFO - Starting file synchronization for example-com
+2024-12-14 10:32:15 - ssh_client - INFO - File synchronization completed successfully
+2024-12-14 10:32:16 - backup_storage - INFO - Creating database archive: example-com_db_2024-12-14_10-30-15.tar.gz
+2024-12-14 10:32:18 - backup_storage - INFO - Archive verification successful: /opt/wp-backups/example-com/example-com_db_2024-12-14_10-30-15.tar.gz
+```
+
+### Error Handling Examples
+
+**SSH Connection Failure:**
+```
+2024-12-14 10:30:15 - ssh_client - WARNING - SSH connection attempt 1 failed: Connection refused
+2024-12-14 10:30:15 - ssh_client - INFO - Waiting 5 seconds before retry...
+2024-12-14 10:30:21 - ssh_client - INFO - SSH connection successful to server1.provider.com
+```
+
+**Database Access Error:**
+```
+2024-12-14 10:30:25 - ssh_client - ERROR - mysqldump failed: Access denied for user 'dbuser'@'localhost'
+2024-12-14 10:30:25 - backup_controller - ERROR - Site example-com backup failed
+2024-12-14 10:30:25 - backup_controller - INFO - Processing site: next-site
+```
+
+**Archive Verification Failure:**
+```
+2024-12-14 10:32:18 - backup_storage - ERROR - Archive verification failed: /path/to/archive.tar.gz
+2024-12-14 10:32:18 - backup_storage - ERROR -   - Invalid SQL syntax or content
+2024-12-14 10:32:18 - backup_controller - ERROR - Archive creation or verification failed for example-com
+```
+
+### Monitoring Integration
+
+The tool supports monitoring integration through:
+
+1. **Exit codes** for script automation
+2. **Structured logging** for log aggregation
+3. **JSON summary** output for parsing
+4. **File-based checksums** for integrity monitoring
+
+**Example monitoring script:**
+```bash
+#!/bin/bash
+# Simple monitoring wrapper
+
+python wp-backup.py --quiet
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "✓ WordPress backup completed successfully"
+    # Send success notification
+else
+    echo "✗ WordPress backup failed (exit code: $EXIT_CODE)"
+    # Send alert notification
+    tail -20 /var/log/wp-backup.log
+fi
+
+exit $EXIT_CODE
+```
 
 ```python
 def cleanup_old_backups(self, site_name: str, retention_days: int):
@@ -700,3 +866,67 @@ def validate_ssh_key(self, key_path: str) -> bool:
 - Validate all input parameters
 - Sanitize paths and commands
 - Use secure temporary file creation
+
+## Troubleshooting
+
+### Common Issues
+
+**1. SSH Connection Failures**
+```bash
+# Test SSH connection manually
+ssh -i ~/.ssh/wp-backup-key user@server.com
+
+# Check SSH key permissions
+ls -la ~/.ssh/wp-backup-key  # Should be -rw-------
+```
+
+**2. Permission Errors**
+```bash
+# Fix SSH key permissions
+chmod 600 ~/.ssh/wp-backup-key
+
+# Check backup directory permissions
+ls -la /opt/wp-backups  # Should be writable by current user
+```
+
+**3. mysqldump Failures**
+- Verify database credentials in wp-config.php
+- Ensure mysqldump is installed on remote server
+- Check database user has SELECT, LOCK TABLES privileges
+
+**4. rsync Issues**
+- Verify rsync is installed on both local and remote systems
+- Check exclude patterns in configuration
+- Test rsync manually:
+  ```bash
+  rsync -avz -e "ssh -i ~/.ssh/wp-backup-key" user@server:/var/www/html/ /tmp/test/
+  ```
+
+**5. WSL-Specific Issues**
+- Use WSL filesystem paths for backups: `/home/user/backups` not `/mnt/c/backups`
+- Ensure SSH keys are in WSL filesystem with correct permissions
+- Install required utilities in WSL: `sudo apt install rsync openssh-client`
+
+### Debug Mode
+
+Enable verbose logging for troubleshooting:
+```bash
+# Maximum verbosity
+python wp-backup.py --verbose --verbose
+
+# Test specific site
+python wp-backup.py --site problem-site --dry-run --verbose
+```
+
+### Performance Optimization
+
+**For Large Sites:**
+- Use more specific exclude patterns
+- Consider backup scheduling during off-peak hours
+- Monitor disk space on backup destination
+- Implement backup rotation for very large sites
+
+**Network Optimization:**
+- Use SSH connection multiplexing for multiple operations
+- Configure rsync bandwidth limits if needed
+- Consider compression settings based on file types
