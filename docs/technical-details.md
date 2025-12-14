@@ -28,58 +28,47 @@ ssh                     # SSH client
 
 ## Configuration Schema
 
-### Main Configuration File (config.json)
+### Configuration File (config.json)
 ```json
 {
-  "global": {
-    "backup_root": "/opt/wp-backups",
-    "log_level": "INFO",
-    "log_file": "/var/log/wp-backup.log",
-    "retention_days": 30,
-    "compression": "gzip",
-    "parallel_instances": false
-  },
-  "defaults": {
-    "ssh_port": 22,
-    "ssh_timeout": 30,
-    "backup_mode": "incremental",
-    "include_uploads": true,
-    "exclude_cache": true
-  },
-  "instances": [
+  "backup_dir": "/opt/wp-backups",
+  "retention_days": 30,
+  "log_level": "INFO",
+  "log_file": "/var/log/wp-backup.log",
+  "sites": [
     {
       "name": "example-com",
       "description": "Main company website",
-      "ssh": {
-        "host": "server1.provider.com",
-        "port": 22,
-        "username": "user1",
-        "private_key_path": "~/.ssh/wp-backup-key",
-        "host_key_policy": "strict"
-      },
-      "paths": {
-        "web_root": "/var/www/html",
-        "wp_config": "/var/www/html/wp-config.php",
-        "exclude_patterns": ["*.log", "wp-content/cache/*"]
-      },
-      "database": {
-        "auto_discover": true,
-        "manual_override": {
-          "host": null,
-          "name": null,
-          "user": null,
-          "password": null
-        }
-      },
-      "backup": {
-        "mode": "incremental",
-        "schedule": "daily",
-        "retention_days": 60
-      }
+      "ssh_host": "server1.provider.com",
+      "ssh_port": 22,
+      "ssh_user": "user1",
+      "ssh_key": "~/.ssh/wp-backup-key",
+      "web_root": "/var/www/html",
+      "wp_config_path": "/var/www/html/wp-config.php",
+      "retention_days": 60,
+      "exclude_patterns": ["*.log", "wp-content/cache/*"]
+    },
+    {
+      "name": "shop-example-net",
+      "description": "E-commerce site",
+      "ssh_host": "server2.provider.com", 
+      "ssh_user": "user2",
+      "ssh_key": "~/.ssh/wp-backup-key",
+      "web_root": "/var/www/shop",
+      "exclude_patterns": ["wp-content/uploads/wc-logs/*"]
     }
   ]
 }
 ```
+
+### Configuration Field Definitions
+- **backup_dir**: Local directory for storing backup archives
+- **retention_days**: Global default for cleanup (can be overridden per site)
+- **sites[].name**: Unique identifier used in archive filenames
+- **sites[].ssh_***: SSH connection parameters
+- **sites[].web_root**: WordPress installation directory
+- **sites[].wp_config_path**: Path to wp-config.php (defaults to web_root/wp-config.php)
+- **sites[].exclude_patterns**: rsync exclusion patterns for files
 
 ### SSH Key Configuration
 ```bash
@@ -96,36 +85,54 @@ chmod 644 ~/.ssh/wp-backup-key.pub
 
 ## Core Module Specifications
 
-### 1. ConfigManager Class
+### 1. BackupController Class
 ```python
-class ConfigManager:
-    """Handle configuration file operations and validation."""
+class BackupController:
+    """Main orchestrator for WordPress backup operations."""
+    
+    def __init__(self, config_file: str):
+        self.config_file = config_file
+        self.config = None
+        self.logger = None
+    
+    def run_backup(self, site_filter: str = None) -> bool:
+        """Execute backup for all sites or specific site."""
+        pass
+    
+    def setup_logging(self) -> logging.Logger:
+        """Configure logging based on config settings."""
+        pass
+    
+    def backup_site(self, site_config: dict) -> bool:
+        """Backup single WordPress site."""
+        pass
+```
+
+### 2. ConfigLoader Class
+```python
+class ConfigLoader:
+    """Simple configuration file loader and validator."""
     
     def __init__(self, config_path: str):
         self.config_path = config_path
-        self.config = None
     
     def load_config(self) -> dict:
         """Load and validate configuration file."""
         pass
     
     def validate_config(self, config: dict) -> bool:
-        """Validate configuration schema and values."""
+        """Validate configuration schema and required fields."""
         pass
     
-    def get_instances(self) -> List[dict]:
-        """Return list of configured WordPress instances."""
-        pass
-    
-    def get_global_settings(self) -> dict:
-        """Return global configuration settings."""
+    def get_sites(self) -> List[dict]:
+        """Return list of configured WordPress sites."""
         pass
 ```
 
-### 2. SSHConnector Class
+### 3. SSHClient Class  
 ```python
-class SSHConnector:
-    """Handle SSH connections and remote operations."""
+class SSHClient:
+    """Handle all SSH operations for remote WordPress sites."""
     
     def __init__(self, host: str, username: str, key_path: str, port: int = 22):
         self.host = host
@@ -133,91 +140,56 @@ class SSHConnector:
         self.key_path = key_path
         self.port = port
         self.client = None
-        self.sftp = None
     
-    def connect(self) -> bool:
-        """Establish SSH connection."""
+    def connect_with_retry(self) -> bool:
+        """Establish SSH connection with 5 retries at 5s intervals."""
         pass
     
-    def execute_command(self, command: str) -> tuple:
-        """Execute remote command and return output."""
+    def parse_wp_config(self, wp_config_path: str) -> dict:
+        """Parse wp-config.php file for database credentials."""
         pass
     
-    def download_file(self, remote_path: str, local_path: str) -> bool:
-        """Download file via SFTP."""
+    def execute_mysqldump(self, db_config: dict, output_file: str) -> bool:
+        """Execute mysqldump and download result."""
         pass
     
-    def upload_file(self, local_path: str, remote_path: str) -> bool:
-        """Upload file via SFTP."""
+    def execute_rsync(self, remote_path: str, local_path: str, 
+                      exclude_patterns: List[str] = None, 
+                      is_first_backup: bool = False) -> bool:
+        """Execute rsync file synchronization."""
         pass
     
     def close(self):
-        """Close SSH and SFTP connections."""
+        """Close SSH connection."""
         pass
 ```
 
-### 3. DatabaseHandler Class
+### 4. BackupStorage Class
 ```python
-class DatabaseHandler:
-    """Handle database backup operations."""
+class BackupStorage:
+    """Local backup file management and archiving."""
     
-    def __init__(self, ssh_connector: SSHConnector):
-        self.ssh = ssh_connector
-        self.db_config = None
+    def __init__(self, backup_dir: str):
+        self.backup_dir = backup_dir
     
-    def parse_wp_config(self, wp_config_path: str) -> dict:
-        """Parse wp-config.php for database credentials."""
+    def create_db_archive(self, site_name: str, dump_file: str) -> str:
+        """Create timestamped database archive."""
         pass
     
-    def create_dump(self, output_path: str) -> bool:
-        """Create database dump using mysqldump."""
-        pass
-    
-    def validate_dump(self, dump_path: str) -> bool:
-        """Validate database dump integrity."""
-        pass
-```
-
-### 4. FileHandler Class
-```python
-class FileHandler:
-    """Handle file synchronization and backup operations."""
-    
-    def __init__(self, ssh_connector: SSHConnector):
-        self.ssh = ssh_connector
-    
-    def sync_files(self, remote_path: str, local_path: str, mode: str = "incremental") -> bool:
-        """Synchronize files using rsync."""
-        pass
-    
-    def build_rsync_command(self, source: str, destination: str, options: dict) -> str:
-        """Build rsync command with appropriate options."""
-        pass
-    
-    def validate_sync(self, source: str, destination: str) -> bool:
-        """Validate file synchronization results."""
-        pass
-```
-
-### 5. ArchiveManager Class
-```python
-class ArchiveManager:
-    """Create and manage backup archives."""
-    
-    def __init__(self, backup_root: str, compression: str = "gzip"):
-        self.backup_root = backup_root
-        self.compression = compression
-    
-    def create_archive(self, source_path: str, archive_name: str) -> str:
-        """Create compressed archive from source directory."""
+    def create_files_archive(self, site_name: str, files_dir: str) -> str:
+        """Create timestamped files archive."""
         pass
     
     def generate_timestamp(self) -> str:
-        """Generate timestamp for archive naming."""
+        """Generate YYYY-MM-DD_HH-MM-SS timestamp."""
         pass
     
-    def cleanup_old_backups(self, instance_name: str, retention_days: int):
-        """Remove old backup archives based on retention policy."""
+    def verify_archive_integrity(self, archive_path: str) -> bool:
+        """Verify archive integrity and generate checksums."""
+        pass
+    
+    def cleanup_old_backups(self, site_name: str, retention_days: int):
+        """Remove backups older than retention period."""
         pass
 ```
 
@@ -279,42 +251,249 @@ def build_mysqldump_command(self, db_config: dict, output_path: str) -> str:
     return command
 ```
 
-## File Synchronization Strategy
+### Rsync Strategy (WSL-Compatible)
 
-### Rsync Configuration
 ```python
-def build_rsync_options(self, mode: str, exclude_patterns: List[str] = None) -> dict:
-    """Build rsync options based on backup mode and exclusions."""
+def build_rsync_command(self, remote_path: str, local_path: str, 
+                        exclude_patterns: List[str] = None,
+                        is_first_backup: bool = False) -> str:
+    """Build rsync command optimized for incremental backups."""
     
+    # Base options for all rsync operations
     base_options = [
-        "-a",           # Archive mode (recursive, preserve attributes)
-        "-v",           # Verbose output
-        "-z",           # Compress during transfer
-        "--stats",      # Show transfer statistics
-        "--human-readable"  # Human-readable output
+        "-avz",              # Archive mode + verbose + compress
+        "--stats",           # Show transfer statistics  
+        "--human-readable",  # Human-readable output
+        "--progress",        # Show progress during transfer
+        "--partial",         # Keep partially transferred files
+        "--timeout=300"      # 5-minute timeout
     ]
     
-    if mode == "incremental":
+    # Incremental options (skip for first backup)
+    if not is_first_backup:
         base_options.extend([
-            "--update",     # Skip files newer on destination
-            "--times",      # Preserve modification times
-            "--checksum"    # Use checksums for comparison
+            "--update",       # Skip files newer on destination
+            "--existing",     # Only update files that exist in dest
+            "--ignore-times"  # Don't rely on timestamps alone
         ])
     
+    # Add exclusion patterns
     if exclude_patterns:
         for pattern in exclude_patterns:
             base_options.append(f"--exclude={pattern}")
     
-    return {
-        "options": base_options,
-        "ssh_options": [
-            "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=~/.ssh/known_hosts"
-        ]
-    }
+    # Standard WordPress exclusions
+    base_options.extend([
+        "--exclude=*.log",
+        "--exclude=wp-content/cache/",
+        "--exclude=wp-content/backup*/"
+    ])
+    
+    # SSH options for secure connection
+    ssh_opts = [
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "UserKnownHostsFile=~/.ssh/known_hosts",
+        "-o", "ConnectTimeout=30"
+    ]
+    
+    ssh_command = f"ssh {' '.join(ssh_opts)}"
+    
+    return f"rsync {' '.join(base_options)} -e '{ssh_command}' {self.username}@{self.host}:{remote_path}/ {local_path}/"
 ```
 
-## Error Handling and Logging
+### First Backup Detection
+```python
+def is_first_backup(self, site_name: str) -> bool:
+    """Check if this is the first backup for a site."""
+    
+    site_backup_dir = os.path.join(self.backup_dir, site_name)
+    
+    # No backup directory = first backup
+    if not os.path.exists(site_backup_dir):
+        return True
+    
+    # No files archives = first backup  
+    files_pattern = f"{site_name}_files_*.tar.gz"
+    existing_files = glob.glob(os.path.join(site_backup_dir, files_pattern))
+    
+    return len(existing_files) == 0
+```
+
+### Incremental Backup Strategy
+- **First backup**: Full rsync without `--update` flag
+- **Subsequent backups**: Use `--update` to only transfer newer files
+- **File comparison**: Based on modification time and size (not checksums during transfer)
+- **Storage**: Each backup creates separate timestamped archive
+- **No hard links**: Avoids WSL compatibility issues
+
+### Comprehensive Backup Verification
+
+```python
+import hashlib
+import tarfile
+import gzip
+import sqlite3
+
+class BackupVerifier:
+    """Full verification of backup archives with checksums."""
+    
+    def verify_database_archive(self, archive_path: str) -> dict:
+        """Verify database archive integrity and content."""
+        
+        result = {
+            "archive_valid": False,
+            "sql_valid": False, 
+            "checksum": None,
+            "errors": []
+        }
+        
+        try:
+            # 1. Verify tar.gz archive integrity
+            with tarfile.open(archive_path, 'r:gz') as tar:
+                tar.getmembers()  # This will fail if corrupted
+            result["archive_valid"] = True
+            
+            # 2. Extract and validate SQL content
+            with tarfile.open(archive_path, 'r:gz') as tar:
+                sql_file = tar.extractfile(tar.getmembers()[0])
+                sql_content = sql_file.read().decode('utf-8')
+                
+                # Basic SQL validation
+                if self._validate_sql_syntax(sql_content):
+                    result["sql_valid"] = True
+                else:
+                    result["errors"].append("Invalid SQL syntax")
+            
+            # 3. Generate SHA256 checksum
+            result["checksum"] = self._calculate_file_checksum(archive_path)
+            
+        except Exception as e:
+            result["errors"].append(f"Archive verification failed: {str(e)}")
+        
+        return result
+    
+    def verify_files_archive(self, archive_path: str, expected_file_count: int = None) -> dict:
+        """Verify files archive integrity and content."""
+        
+        result = {
+            "archive_valid": False,
+            "file_count": 0,
+            "checksum": None,
+            "errors": []
+        }
+        
+        try:
+            # 1. Verify tar.gz archive integrity  
+            with tarfile.open(archive_path, 'r:gz') as tar:
+                members = tar.getmembers()
+                result["file_count"] = len(members)
+            result["archive_valid"] = True
+            
+            # 2. Validate file count if expected count provided
+            if expected_file_count and result["file_count"] < expected_file_count * 0.95:
+                result["errors"].append(f"File count too low: {result['file_count']} < {expected_file_count}")
+            
+            # 3. Generate SHA256 checksum
+            result["checksum"] = self._calculate_file_checksum(archive_path)
+            
+        except Exception as e:
+            result["errors"].append(f"Archive verification failed: {str(e)}")
+        
+        return result
+    
+    def _validate_sql_syntax(self, sql_content: str) -> bool:
+        """Basic SQL syntax validation for MySQL dumps."""
+        
+        required_patterns = [
+            "-- MySQL dump",
+            "CREATE TABLE",
+            "INSERT INTO"
+        ]
+        
+        for pattern in required_patterns:
+            if pattern not in sql_content:
+                return False
+        
+        # Check for common corruption signs
+        corruption_signs = [
+            "ERROR 1",
+            "Access denied",
+            "Connection failed"
+        ]
+        
+        for sign in corruption_signs:
+            if sign in sql_content:
+                return False
+                
+        return True
+    
+    def _calculate_file_checksum(self, file_path: str) -> str:
+        """Calculate SHA256 checksum of file."""
+        
+        hash_sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_sha256.update(chunk)
+        
+        return hash_sha256.hexdigest()
+    
+    def save_checksums(self, site_name: str, timestamp: str, 
+                       db_checksum: str, files_checksum: str):
+        """Save checksums to verification file."""
+        
+        checksum_file = os.path.join(self.backup_dir, site_name, f"{site_name}_checksums.json")
+        
+        # Load existing checksums
+        checksums = {}
+        if os.path.exists(checksum_file):
+            with open(checksum_file, 'r') as f:
+                checksums = json.load(f)
+        
+        # Add new checksums
+        checksums[timestamp] = {
+            "database": db_checksum,
+            "files": files_checksum,
+            "verified_at": datetime.now().isoformat()
+        }
+        
+        # Save updated checksums
+        with open(checksum_file, 'w') as f:
+            json.dump(checksums, f, indent=2)
+```
+
+### Verification Integration
+```python
+def create_verified_backup(self, site_name: str, db_file: str, files_dir: str) -> bool:
+    """Create backup archives with full verification."""
+    
+    timestamp = self.generate_timestamp()
+    verifier = BackupVerifier()
+    
+    # Create archives
+    db_archive = self.create_db_archive(site_name, db_file, timestamp)
+    files_archive = self.create_files_archive(site_name, files_dir, timestamp)
+    
+    # Verify archives
+    db_result = verifier.verify_database_archive(db_archive)
+    files_result = verifier.verify_files_archive(files_archive)
+    
+    # Check verification results
+    if not (db_result["archive_valid"] and db_result["sql_valid"]):
+        self.logger.error(f"Database backup verification failed: {db_result['errors']}")
+        return False
+        
+    if not files_result["archive_valid"]:
+        self.logger.error(f"Files backup verification failed: {files_result['errors']}")
+        return False
+    
+    # Save checksums
+    verifier.save_checksums(site_name, timestamp, 
+                           db_result["checksum"], 
+                           files_result["checksum"])
+    
+    self.logger.info(f"Backup verification successful for {site_name}")
+    return True
+```
 
 ### Logging Configuration
 ```python
@@ -397,7 +576,90 @@ class ConfigurationError(BackupError):
 - Use appropriate compression algorithms
 - Monitor disk space before backup operations
 
-## Security Implementation
+### Retention Policy Implementation
+
+```python
+def cleanup_old_backups(self, site_name: str, retention_days: int):
+    """Remove backup archives older than retention period."""
+    
+    site_backup_dir = os.path.join(self.backup_dir, site_name)
+    if not os.path.exists(site_backup_dir):
+        return
+    
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    removed_count = 0
+    
+    # Find all backup archives for this site
+    archive_patterns = [
+        f"{site_name}_db_*.tar.gz",
+        f"{site_name}_files_*.tar.gz"
+    ]
+    
+    for pattern in archive_patterns:
+        for archive_path in glob.glob(os.path.join(site_backup_dir, pattern)):
+            try:
+                # Extract timestamp from filename
+                filename = os.path.basename(archive_path)
+                timestamp_str = self._extract_timestamp_from_filename(filename)
+                archive_date = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+                
+                # Remove if older than retention period
+                if archive_date < cutoff_date:
+                    os.remove(archive_path)
+                    removed_count += 1
+                    self.logger.info(f"Removed old backup: {filename}")
+                    
+            except (ValueError, OSError) as e:
+                self.logger.warning(f"Could not process {archive_path}: {e}")
+    
+    # Also cleanup old checksums
+    checksum_file = os.path.join(site_backup_dir, f"{site_name}_checksums.json")
+    if os.path.exists(checksum_file):
+        self._cleanup_old_checksums(checksum_file, retention_days)
+    
+    self.logger.info(f"Cleaned up {removed_count} old backup files for {site_name}")
+
+def _extract_timestamp_from_filename(self, filename: str) -> str:
+    """Extract timestamp from backup filename."""
+    # Expected format: sitename_type_YYYY-MM-DD_HH-MM-SS.tar.gz
+    import re
+    pattern = r'\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}'
+    match = re.search(pattern, filename)
+    if match:
+        return match.group(0)
+    else:
+        raise ValueError(f"No timestamp found in filename: {filename}")
+
+def _cleanup_old_checksums(self, checksum_file: str, retention_days: int):
+    """Remove old entries from checksum file."""
+    
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    
+    with open(checksum_file, 'r') as f:
+        checksums = json.load(f)
+    
+    # Filter out old entries
+    updated_checksums = {}
+    for timestamp, data in checksums.items():
+        try:
+            archive_date = datetime.strptime(timestamp, "%Y-%m-%d_%H-%M-%S")
+            if archive_date >= cutoff_date:
+                updated_checksums[timestamp] = data
+        except ValueError:
+            # Keep entries with invalid timestamps for manual review
+            updated_checksums[timestamp] = data
+    
+    # Save updated checksums
+    with open(checksum_file, 'w') as f:
+        json.dump(updated_checksums, f, indent=2)
+```
+
+### Retention Policy Examples
+- **30 days**: Keep ~30 daily backups per site
+- **60 days**: Keep ~60 daily backups (for critical sites)
+- **7 days**: Keep 1 week of backups (for test sites)
+
+Retention is applied **before** each new backup to ensure space availability.
 
 ### SSH Security
 ```python

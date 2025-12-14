@@ -8,21 +8,18 @@ The WordPress Multi-Instance Backup Tool follows a modular architecture with cle
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Linux Host                               │
-│                                                             │
-│ ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│ │   Config    │  │   Logger    │  │  Archive    │          │
-│ │  Manager    │  │             │  │  Manager    │          │
-│ └─────────────┘  └─────────────┘  └─────────────┘          │
-│                                                             │
-│ ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│ │    SSH      │  │  Database   │  │    File     │          │
-│ │ Connector   │  │   Handler   │  │  Handler    │          │
-│ └─────────────┘  └─────────────┘  └─────────────┘          │
+│                    Linux Host (or WSL)                     │
 │                                                             │
 │ ┌─────────────────────────────────────────────────────────┐│
-│ │              Main Backup Controller                     ││
+│ │              Backup Controller                          ││
+│ │            (Orchestrates Process)                       ││
 │ └─────────────────────────────────────────────────────────┘│
+│                                                             │
+│ ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│ │ Config      │  │ SSH Client  │  │ Backup      │          │
+│ │ Loader      │  │ (All Remote │  │ Storage     │          │
+│ │             │  │ Operations) │  │ (Archives)  │          │
+│ └─────────────┘  └─────────────┘  └─────────────┘          │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ SSH/SFTP
@@ -50,96 +47,79 @@ The WordPress Multi-Instance Backup Tool follows a modular architecture with cle
 
 ### Core Components
 
-#### 1. Main Backup Controller
-- **Purpose**: Orchestrates the entire backup process
+#### 1. Backup Controller
+- **Purpose**: Orchestrates the entire backup workflow
 - **Responsibilities**:
   - Load and validate configuration
-  - Iterate through configured instances
-  - Coordinate backup operations
-  - Handle global error scenarios
-  - Generate summary reports
+  - Iterate through configured WordPress sites
+  - Coordinate backup operations with error recovery
+  - Generate backup summary reports
+  - Manage overall logging and monitoring
 
-#### 2. Config Manager
-- **Purpose**: Handle configuration file operations
+#### 2. Config Loader
+- **Purpose**: Simple configuration management
 - **Responsibilities**:
-  - Parse JSON/YAML configuration files
-  - Validate configuration syntax and values
-  - Provide configuration data to other components
-  - Handle configuration file security
+  - Parse JSON configuration file
+  - Validate required fields and formats
+  - Provide site configurations to controller
+  - Handle configuration security (file permissions)
 
-#### 3. SSH Connector
-- **Purpose**: Manage SSH connections and remote operations
+#### 3. SSH Client
+- **Purpose**: Handle all remote operations via SSH
 - **Responsibilities**:
-  - Establish SSH connections using key authentication
-  - Execute remote commands
-  - Handle SFTP file transfers
-  - Manage connection lifecycle and cleanup
+  - Establish and manage SSH connections
+  - Execute mysqldump commands remotely
+  - Execute rsync for file synchronization
+  - Parse wp-config.php files remotely
+  - Handle SSH authentication and connection errors
+  - Implement retry logic for network failures
 
-#### 4. Database Handler
-- **Purpose**: Handle database backup operations
+#### 4. Backup Storage
+- **Purpose**: Local backup file management
 - **Responsibilities**:
-  - Parse wp-config.php for database credentials
-  - Execute remote mysqldump commands
-  - Transfer database dumps to local system
-  - Validate database backup integrity
-
-#### 5. File Handler
-- **Purpose**: Manage file synchronization and backup
-- **Responsibilities**:
-  - Execute rsync operations for file synchronization
-  - Handle incremental and full backup modes
-  - Manage file transfer progress and errors
-  - Preserve file permissions and timestamps
-
-#### 6. Archive Manager
-- **Purpose**: Create and manage backup archives
-- **Responsibilities**:
-  - Compress backup files into archives
-  - Generate timestamped file names
-  - Manage backup retention policies
-  - Clean up temporary files
-
-#### 7. Logger
-- **Purpose**: Centralized logging and monitoring
-- **Responsibilities**:
-  - Log all operations and errors
-  - Generate backup reports
-  - Monitor system performance
-  - Handle log rotation and retention
+  - Create timestamped compressed archives
+  - Manage separate database and file archives
+  - Implement retention policy (cleanup old backups)
+  - Verify backup integrity with checksums
+  - Handle local file system operations
 
 ## Data Flow
 
-### 1. Initialization Phase
+### Simplified Backup Workflow
 ```
-Configuration File → Config Manager → Validation → Main Controller
-```
-
-### 2. Instance Processing Phase
-```
-For each WordPress instance:
-  SSH Connection → Remote Discovery → Database Backup → File Backup → Archive Creation
+Config File → Config Loader → Controller → For Each Site:
+    ├── SSH Client: Parse wp-config.php
+    ├── SSH Client: Execute mysqldump → Backup Storage: DB Archive
+    ├── SSH Client: Execute rsync → Backup Storage: Files Archive
+    └── Backup Storage: Verify + Cleanup Old Backups
 ```
 
-### 3. Backup Operation Flow
+### Detailed Operation Flow
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Establish   │───▶│   Parse     │───▶│  Execute    │
-│ SSH Conn    │    │ wp-config   │    │ mysqldump   │
+│Load Config  │───▶│ For Each    │───▶│ Connect SSH │
+│& Validate   │    │ Site        │    │ (5 retries) │
 └─────────────┘    └─────────────┘    └─────────────┘
                                              │
                                              ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Create    │◀───│  Transfer   │◀───│  Compress   │
-│  Archive    │    │  to Local   │    │    Dump     │
+│Create DB    │◀───│ Compress &  │◀───│ Execute     │
+│Archive +    │    │ Verify      │    │ mysqldump   │
+│Checksum     │    │ Checksums   │    │             │
 └─────────────┘    └─────────────┘    └─────────────┘
-```
-
-### 4. File Synchronization Flow
-```
+                                             │
+                                             ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Analyze     │───▶│  Execute    │───▶│   Create    │
-│ Changes     │    │   rsync     │    │  Archive    │
+│Create Files │◀───│ Compress &  │◀───│ Execute     │
+│Archive +    │    │ Verify      │    │ rsync       │
+│Checksum     │    │ Checksums   │    │ --update    │
 └─────────────┘    └─────────────┘    └─────────────┘
+                                             │
+                                             ▼
+                          ┌─────────────────────────────┐
+                          │ Cleanup Old Backups        │
+                          │ (Retention Policy)          │
+                          └─────────────────────────────┘
 ```
 
 ## Security Architecture
@@ -173,12 +153,32 @@ For each WordPress instance:
 
 ## Error Handling Strategy
 
-### Fault Tolerance
-- Continue processing remaining instances on single failure
-- Retry mechanisms for transient network issues
-- Graceful degradation for partial failures
+### Error Classification and Response
+
+#### Fatal Errors (Abort Completely)
+- Configuration file missing or invalid JSON syntax
+- SSH private key file missing or invalid permissions
+- Backup storage directory not writable
+
+#### Recoverable Errors (Log + Continue to Next Site)
+- SSH authentication failure for specific site
+- wp-config.php file not found or unreadable
+- mysqldump command failure (database access issues)
+- rsync failure (permission or disk space issues)
+
+#### Transient Errors (Retry with Backoff)
+- SSH connection timeouts or network issues
+- Temporary file system errors
+- **Retry Strategy**: 5 attempts with 5-second intervals
+
+### Backup Verification (Full Checksum Validation)
+- **Database Archives**: Validate gzip integrity + SQL syntax check
+- **File Archives**: Verify tar.gz integrity + file count comparison
+- **Checksums**: Generate and store SHA256 checksums for all archives
+- **Failed Verification**: Log error, mark backup as incomplete, continue to next site
 
 ### Recovery Procedures
-- Detailed error logging and reporting
-- Backup verification mechanisms
-- Manual recovery documentation
+- Detailed per-site backup status in logs
+- Failed backups clearly marked with error codes
+- Checksum files enable integrity verification
+- Manual re-run possible for individual sites
