@@ -8,6 +8,7 @@ import paramiko
 import time
 import re
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Tuple, List
 import subprocess
@@ -59,7 +60,16 @@ class SSHClient:
                 
                 # Create new SSH client
                 self.client = paramiko.SSHClient()
-                self.client.set_missing_host_key_policy(paramiko.AutoAddHostPolicy())
+                
+                # Load host keys and set policy to auto-accept unknown hosts
+                self.client.load_system_host_keys()
+                try:
+                    self.client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
+                except FileNotFoundError:
+                    pass  # known_hosts file doesn't exist yet
+                
+                # Use WarningPolicy which accepts unknown hosts but logs a warning
+                self.client.set_missing_host_key_policy(paramiko.WarningPolicy())
                 
                 # Connect with key authentication
                 self.client.connect(
@@ -159,10 +169,10 @@ class SSHClient:
         
         # Parse database configuration using regex
         db_patterns = {
-            'DB_NAME': r"define\\s*\\(\\s*['\"]DB_NAME['\"]\\s*,\\s*['\"]([^'\"]+)['\"]",
-            'DB_USER': r"define\\s*\\(\\s*['\"]DB_USER['\"]\\s*,\\s*['\"]([^'\"]+)['\"]", 
-            'DB_PASSWORD': r"define\\s*\\(\\s*['\"]DB_PASSWORD['\"]\\s*,\\s*['\"]([^'\"]*)['\"]",
-            'DB_HOST': r"define\\s*\\(\\s*['\"]DB_HOST['\"]\\s*,\\s*['\"]([^'\"]+)['\"]"
+            'DB_NAME': r"define\s*\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]",
+            'DB_USER': r"define\s*\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]", 
+            'DB_PASSWORD': r"define\s*\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]*)['\"]",
+            'DB_HOST': r"define\s*\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]"
         }
         
         db_config = {}
