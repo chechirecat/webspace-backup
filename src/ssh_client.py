@@ -281,12 +281,12 @@ class SSHClient:
                     # File has content, let's see what's in it to debug the verification issue
                     head_cmd = f"head -n 20 {remote_dump_file}"
                     _, head_out, _ = self.execute_command(head_cmd)
-                    self.logger.debug(f"Dump file preview (first 20 lines):")
+                    self.logger.debug("Dump file preview (first 20 lines):")
                     self.logger.debug(f"{head_out}")
                     
                     # Specifically check for MySQL dump header
                     if "-- MySQL dump" not in head_out:
-                        self.logger.error(f"Dump file missing MySQL header. Content starts with:")
+                        self.logger.error("Dump file missing MySQL header. Content starts with:")
                         self.logger.error(f"{head_out[:200]}...")
             else:
                 # Fallback check
