@@ -159,13 +159,30 @@ class SSHClient:
             RemoteOperationError: If wp-config.php cannot be read or parsed
         """
         # Read wp-config.php file
-        command = f"cat {wp_config_path}"
+        command = f"grep 'DB_NAME\\\\|DB_USER\\\\|DB_PASSWORD\\\\|DB_HOST' {wp_config_path}"
+        self.logger.debug(f"Executing wp-config parsing command: {command}")
         exit_code, stdout, stderr = self.execute_command(command)
         
-        if exit_code != 0:
-            raise RemoteOperationError(f"Failed to read wp-config.php: {stderr}")
+        self.logger.debug(f"wp-config grep exit_code: {exit_code}")
+        self.logger.debug(f"wp-config grep stdout: {stdout}")
+        self.logger.debug(f"wp-config grep stderr: {stderr}")
         
-        config_content = stdout
+        if exit_code != 0:
+            # Try alternative approach - cat the file and grep locally
+            cat_command = f"cat {wp_config_path}"
+            self.logger.debug(f"Trying alternative: {cat_command}")
+            exit_code, stdout, stderr = self.execute_command(cat_command)
+            
+            if exit_code != 0:
+                raise RemoteOperationError(f"Failed to read wp-config.php: {stderr}")
+            
+            # Filter for database lines locally
+            lines = stdout.split('\n')
+            config_lines = [line for line in lines if any(db_key in line for db_key in ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'])]
+            config_content = '\n'.join(config_lines)
+            self.logger.debug(f"Filtered config content: {config_content}")
+        else:
+            config_content = stdout
         
         # Parse database configuration using regex
         db_patterns = {
@@ -177,12 +194,16 @@ class SSHClient:
         
         db_config = {}
         for key, pattern in db_patterns.items():
-            match = re.search(pattern, config_content, re.IGNORECASE)
+            match = re.search(pattern, config_content)
             if match:
                 db_config[key.lower()] = match.group(1)
+                self.logger.debug(f"Found {key}: {match.group(1)}")
             else:
                 self.logger.warning(f"Could not find {key} in wp-config.php")
+                self.logger.debug(f"Pattern used: {pattern}")
         
+        self.logger.debug(f"Parsed wp-config.php: {db_config}")
+
         # Validate that we found the essential database parameters
         required_keys = ['db_name', 'db_user', 'db_host']
         missing_keys = [key for key in required_keys if key not in db_config]
@@ -219,10 +240,13 @@ class SSHClient:
             mysqldump_cmd = self._build_mysqldump_command(db_config, remote_dump_file)
             
             self.logger.info(f"Creating database dump: {db_config['db_name']}")
+            self.logger.debug(f"Mysqldump command: {mysqldump_cmd}")
             exit_code, stdout, stderr = self.execute_command(mysqldump_cmd, timeout=600)
             
             if exit_code != 0:
-                raise RemoteOperationError(f"mysqldump failed: {stderr}")
+                self.logger.error(f"Mysqldump stderr: {stderr}")
+                self.logger.error(f"Mysqldump stdout: {stdout}")
+                raise RemoteOperationError(f"mysqldump failed (exit {exit_code}): {stderr}")
             
             # Verify dump file was created and has content
             check_cmd = f"ls -la {remote_dump_file}"
@@ -231,9 +255,27 @@ class SSHClient:
             if exit_code != 0:
                 raise RemoteOperationError(f"Database dump file not created: {stderr}")
             
-            # Check file size
-            if "0 " in stdout:  # File size is 0
-                raise RemoteOperationError("Database dump file is empty")
+            self.logger.debug(f"Dump file info: {stdout}")
+            
+            # Check file size more precisely
+            size_check = stdout.strip().split()
+            if len(size_check) >= 5:
+                file_size = size_check[4]
+                if file_size == "0":
+                    # Try to get more info about why the file is empty
+                    head_cmd = f"head -n 5 {remote_dump_file}"
+                    _, head_out, _ = self.execute_command(head_cmd)
+                    self.logger.error(f"Empty dump file content: '{head_out}'")
+                    raise RemoteOperationError("Database dump file is empty")
+                else:
+                    # File has content, let's see what's in it
+                    head_cmd = f"head -n 10 {remote_dump_file}"
+                    _, head_out, _ = self.execute_command(head_cmd)
+                    self.logger.debug(f"Dump file preview (first 10 lines): {head_out}")
+            else:
+                # Fallback check
+                if "0 " in stdout:  # File size is 0
+                    raise RemoteOperationError("Database dump file is empty")
             
             # Download the dump file using sftp
             if not self.sftp:
@@ -294,15 +336,23 @@ class SSHClient:
         
         # Handle password (might be empty)
         if db_config.get('db_password'):
-            # Escape password for shell
-            escaped_password = db_config['db_password'].replace("'", "\\'")
-            password_param = f"--password='{escaped_password}'"
+            # Use MYSQL_PWD environment variable for safer password handling
+            password_setup = f"MYSQL_PWD='{db_config['db_password']}'"
+            password_param = ""
         else:
+            password_setup = ""
             password_param = "--password=''"
         
         # Build complete command
-        cmd_parts = [base_cmd] + options + [host_param, user_param, password_param, db_config['db_name']]
-        command = f"{' '.join(cmd_parts)} > {output_file}"
+        cmd_parts = [base_cmd] + options + [host_param, user_param]
+        if password_param:
+            cmd_parts.append(password_param)
+        cmd_parts.append(db_config['db_name'])
+        
+        if password_setup:
+            command = f"{password_setup} {' '.join(cmd_parts)} > {output_file}"
+        else:
+            command = f"{' '.join(cmd_parts)} > {output_file}"
         
         return command
     

@@ -21,13 +21,15 @@ class BackupError(Exception):
 class BackupController:
     """Main orchestrator for WordPress backup operations."""
     
-    def __init__(self, config_file: str):
+    def __init__(self, config_file: str, verbose_level: int = 0):
         """Initialize backup controller.
         
         Args:
             config_file: Path to configuration file
+            verbose_level: Verbose logging level (0=normal, 1=verbose, 2=debug)
         """
         self.config_file = config_file
+        self.verbose_level = verbose_level
         self.config_loader = None
         self.config = None
         self.storage = None
@@ -74,7 +76,7 @@ class BackupController:
             for site in sites:
                 site_name = site['name']
                 try:
-                    self.logger.info(f"Processing site: {site_name}")
+                    self.logger.info(f"===>>> Processing site: {site_name}")
                     
                     if dry_run:
                         success = self._test_site_connection(site)
@@ -136,7 +138,7 @@ class BackupController:
                 return False
             
             # Parse WordPress configuration
-            wp_config_path = site_config.get('wp_config_path', f"{site_config['web_root']}/wp-config.php")
+            wp_config_path = site_config.get('wp_config_path', f"{site_config['web_root']}/htdocs/wp-config.php")
             db_config = ssh_client.parse_wp_config(wp_config_path)
             
             # Create temporary directory for this backup
@@ -249,6 +251,67 @@ class BackupController:
                 self.logger.error(f"wp-config.php access failed for {site_name}: {e}")
                 return False
             
+            # Test database connectivity
+            try:
+                self.logger.info(f"Testing database connectivity for {site_name}")
+                
+                # Test if mysqldump is available
+                exit_code, stdout, stderr = ssh_client.execute_command("which mysqldump")
+                if exit_code != 0:
+                    self.logger.error(f"mysqldump not found for {site_name}: {stderr}")
+                    return False
+                else:
+                    mysqldump_path = stdout.strip()
+                    self.logger.debug(f"mysqldump found at: {mysqldump_path}")
+                
+                # Test if mysql client is available
+                exit_code, stdout, stderr = ssh_client.execute_command("which mysql")
+                if exit_code != 0:
+                    self.logger.error(f"mysql client not found for {site_name}: {stderr}")
+                    return False
+                else:
+                    mysql_path = stdout.strip()
+                    self.logger.debug(f"mysql client found at: {mysql_path}")
+                
+                # Get database credentials
+                db_host = db_config.get('db_host', 'localhost')
+                db_name = db_config.get('db_name')
+                db_user = db_config.get('db_user')
+                db_password = db_config.get('db_password')
+                
+                self.logger.debug(f"Testing database connection: {db_user}@{db_host}/{db_name}")
+                
+                # Test database connection using mysql client
+                test_cmd = f"mysql -h {db_host} -u {db_user} -p'{db_password}' -e 'USE {db_name}; SELECT 1;' 2>/dev/null"
+                exit_code, stdout, stderr = ssh_client.execute_command(test_cmd)
+                
+                if exit_code != 0:
+                    # Try to get more detailed error info
+                    detailed_cmd = f"mysql -h {db_host} -u {db_user} -p'{db_password}' -e 'USE {db_name}; SELECT 1;'"
+                    _, _, detailed_stderr = ssh_client.execute_command(detailed_cmd)
+                    self.logger.error(f"Database connection test failed for {site_name}: {detailed_stderr}")
+                    return False
+                
+                self.logger.info(f"Database connectivity test passed for {site_name}")
+                
+                # Test mysqldump specifically (without actually dumping)
+                self.logger.info(f"Testing mysqldump functionality for {site_name}")
+                dump_test_cmd = f"mysqldump -h {db_host} -u {db_user} -p'{db_password}' --single-transaction --routines --triggers --where='1=0' {db_name} 2>/dev/null | head -20"
+                exit_code, stdout, stderr = ssh_client.execute_command(dump_test_cmd)
+                
+                if exit_code != 0:
+                    # Try to get more detailed error info
+                    detailed_dump_cmd = f"mysqldump -h {db_host} -u {db_user} -p'{db_password}' --single-transaction --routines --triggers --where='1=0' {db_name}"
+                    _, _, detailed_stderr = ssh_client.execute_command(detailed_dump_cmd)
+                    self.logger.error(f"mysqldump test failed for {site_name}: {detailed_stderr}")
+                    return False
+                
+                self.logger.info(f"mysqldump functionality test passed for {site_name}")
+                
+            except Exception as e:
+                self.logger.error(f"Database connectivity test failed for {site_name}: {e}")
+                return False
+            
             # Test web root access
             web_root = site_config['web_root']
             exit_code, stdout, stderr = ssh_client.execute_command(f"ls -la {web_root}")
@@ -297,9 +360,18 @@ class BackupController:
         # Clear any existing handlers
         logger.handlers.clear()
         
-        # Set log level
-        log_level = self.config.get('log_level', 'INFO')
-        logger.setLevel(getattr(logging, log_level.upper()))
+        # Set log level - prioritize verbose level over config
+        if self.verbose_level >= 2:
+            logger.setLevel(logging.DEBUG)
+            # Also set root logger to DEBUG to ensure all child loggers work
+            logging.getLogger().setLevel(logging.DEBUG)
+        elif self.verbose_level >= 1:
+            logger.setLevel(logging.INFO)
+            logging.getLogger().setLevel(logging.INFO)
+        else:
+            # Use config setting
+            log_level = self.config.get('log_level', 'INFO')
+            logger.setLevel(getattr(logging, log_level.upper()))
         
         # Create formatters
         detailed_formatter = logging.Formatter(
@@ -322,11 +394,21 @@ class BackupController:
                 file_handler.setFormatter(detailed_formatter)
                 logger.addHandler(file_handler)
             except Exception as e:
-                print(f"Warning: Could not setup file logging: {e}")
+                # Can't use logger yet since we're setting it up, use stderr
+                import sys
+                print(f"Warning: Could not setup file logging: {e}", file=sys.stderr)
         
-        # Console handler
+        # Console handler with verbose level support
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        
+        # Set console log level based on verbose flag
+        if self.verbose_level >= 2:
+            console_handler.setLevel(logging.DEBUG)
+        elif self.verbose_level >= 1:
+            console_handler.setLevel(logging.INFO)
+        else:
+            console_handler.setLevel(logging.INFO)
+        
         console_handler.setFormatter(simple_formatter)
         logger.addHandler(console_handler)
         

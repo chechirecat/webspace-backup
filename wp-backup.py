@@ -7,20 +7,11 @@ Command-line interface for backing up multiple WordPress installations.
 
 import argparse
 import sys
+import logging
 from pathlib import Path
+from src.backup_controller import BackupController, BackupError
+from src.config_loader import ConfigurationError
 
-# Add src directory to Python path
-src_path = Path(__file__).parent / "src"
-sys.path.insert(0, str(src_path))
-
-# Import after path adjustment
-try:
-    from src.backup_controller import BackupController, BackupError
-    from src.config_loader import ConfigurationError
-except ImportError as e:
-    print(f"Import error: {e}", file=sys.stderr)
-    print("Make sure all required modules are in the src/ directory", file=sys.stderr)
-    sys.exit(1)
 
 def main():
     """Main entry point for the WordPress backup tool."""
@@ -29,11 +20,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                          # Backup all configured sites
-  %(prog)s --site example-com       # Backup specific site
-  %(prog)s --dry-run                # Test configuration and connections
+  %(prog)s                            # Backup all configured sites
+  %(prog)s --site example-com         # Backup specific site
+  %(prog)s --dry-run                  # Test configuration and connections
   %(prog)s --config /path/config.json # Use custom config file
-  %(prog)s --summary                # Show backup statistics
+  %(prog)s --summary                  # Show backup statistics
         """
     )
     
@@ -94,7 +85,7 @@ Examples:
         return 1
     
     try:
-        controller = BackupController(str(config_file))
+        controller = BackupController(str(config_file), args.verbose)
         
         # Handle different operation modes
         if args.validate:
@@ -116,6 +107,7 @@ Examples:
     except Exception as e:
         print(f"Unexpected Error: {e}", file=sys.stderr)
         return 1
+
 
 def handle_validate(controller: BackupController) -> int:
     """Handle configuration validation.
@@ -143,6 +135,7 @@ def handle_validate(controller: BackupController) -> int:
     except Exception as e:
         print(f"Validation failed: {e}", file=sys.stderr)
         return 1
+
 
 def handle_summary(controller: BackupController, site_name: str = None) -> int:
     """Handle backup summary display.
@@ -183,6 +176,7 @@ def handle_summary(controller: BackupController, site_name: str = None) -> int:
         print(f"Failed to generate summary: {e}", file=sys.stderr)
         return 1
 
+
 def handle_backup(controller: BackupController, args) -> int:
     """Handle backup operations.
     
@@ -196,14 +190,15 @@ def handle_backup(controller: BackupController, args) -> int:
     try:
         # Configure verbosity based on arguments
         if args.quiet:
-            # Suppress all output except errors - this would require logger reconfiguration
-            pass
+            # Suppress all output except errors
+            logging.getLogger().setLevel(logging.ERROR)
         elif args.verbose >= 2:
-            # Very verbose - would need to set DEBUG level
-            pass
+            # Very verbose - set DEBUG level
+            logging.getLogger().setLevel(logging.DEBUG)
+            logging.getLogger('paramiko').setLevel(logging.WARNING)  # Reduce paramiko noise
         elif args.verbose >= 1:
-            # Verbose - would need to set INFO level (already default)
-            pass
+            # Verbose - set INFO level (already default but ensure it)
+            logging.getLogger().setLevel(logging.INFO)
         
         # Run backup
         success = controller.run_backup(
@@ -216,6 +211,7 @@ def handle_backup(controller: BackupController, args) -> int:
     except Exception as e:
         print(f"Backup operation failed: {e}", file=sys.stderr)
         return 1
+
 
 def format_bytes(bytes_value: int) -> str:
     """Format byte value in human-readable format.
@@ -231,6 +227,7 @@ def format_bytes(bytes_value: int) -> str:
             return f"{bytes_value:.1f} {unit}"
         bytes_value /= 1024.0
     return f"{bytes_value:.1f} PB"
+
 
 def check_dependencies():
     """Check if required system dependencies are available."""
@@ -249,6 +246,7 @@ def check_dependencies():
         return False
     
     return True
+
 
 if __name__ == '__main__':
     # Check system dependencies
