@@ -57,13 +57,20 @@ Edit `config.json` with your WordPress site details:
   "log_file": "/var/log/wp-backup.log",
   "sites": [
     {
-      "name": "your-site",
-      "description": "Your WordPress site",
-      "ssh_host": "your-server.com",
+      "name": "example-com",
+      "description": "Main company website",
+      "ssh_host": "your-server.example.com",
+      "ssh_port": 22,
       "ssh_user": "username",
       "ssh_key": "~/.ssh/wp-backup-key",
       "web_root": "/var/www/html",
-      "exclude_patterns": ["*.log", "wp-content/cache/*"]
+      "wp_config_path": "/var/www/html/wp-config.php",
+      "retention_days": 60,
+      "exclude_patterns": [
+        "*.log",
+        "wp-content/cache/*",
+        "wp-content/backup*/*"
+      ]
     }
   ]
 }

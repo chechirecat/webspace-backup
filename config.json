@@ -19,18 +19,6 @@
         "wp-content/cache/*",
         "wp-content/backup*/*"
       ]
-    },
-    {
-      "name": "blog-example-net",
-      "description": "Personal blog",
-      "ssh_host": "blog-server.example.net",
-      "ssh_user": "bloguser",
-      "ssh_key": "~/.ssh/wp-backup-key",
-      "web_root": "/var/www/blog",
-      "exclude_patterns": [
-        "wp-content/uploads/backup-*/*",
-        "wp-content/cache/*"
-      ]
     }
   ]
 }
