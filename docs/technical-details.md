@@ -4,10 +4,10 @@
 
 ### Core Technologies
 - **Language**: Python 3.8+
-- **SSH/SFTP Library**: Paramiko or Fabric
+- **SSH/SFTP Library**: Paramiko
 - **File Synchronization**: rsync (system utility)
 - **Compression**: Built-in tarfile/gzipfile modules
-- **Configuration**: JSON with optional YAML support
+- **Configuration**: JSON
 - **Logging**: Python logging module with file and console handlers
 
 ### Required Python Packages
@@ -18,8 +18,7 @@ cryptography>=41.0.0     # SSH key handling (required by paramiko)
 
 ### Optional Dependencies
 ```
-# For future enhancements
-pyyaml>=6.0              # YAML configuration support
+# Currently none - all dependencies are required
 ```
 
 ### System Dependencies

@@ -138,7 +138,7 @@ class BackupController:
                 return False
             
             # Parse WordPress configuration
-            wp_config_path = site_config.get('wp_config_path', f"{site_config['web_root']}/htdocs/wp-config.php")
+            wp_config_path = site_config.get('wp_config_path', f"{site_config['web_root']}/wp-config.php")
             db_config = ssh_client.parse_wp_config(wp_config_path)
             
             # Create temporary directory for this backup

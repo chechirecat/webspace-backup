@@ -1,6 +1,3 @@
 # WordPress Backup Tool Dependencies
 paramiko>=3.4.0          # SSH client library
 cryptography>=41.0.0     # SSH key handling (required by paramiko)
-
-# Optional dependencies for enhanced functionality
-# pyyaml>=6.0             # YAML configuration support (if needed later)

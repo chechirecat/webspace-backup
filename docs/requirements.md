@@ -43,7 +43,7 @@
 
 ### FR-005: Configuration Management
 - **Description**: System must use external configuration file
-- **Details**: JSON/YAML configuration defining all WordPress instances and settings
+- **Details**: JSON configuration defining all WordPress instances and settings
 - **Priority**: High
 - **Acceptance Criteria**:
   - Single configuration file for all instances
