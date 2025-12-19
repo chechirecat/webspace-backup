@@ -108,7 +108,7 @@ class BackupVerifier:
         return result
     
     def _validate_sql_syntax(self, sql_content: str) -> bool:
-        """Basic SQL syntax validation for MySQL dumps.
+        """Basic SQL syntax validation for MySQL/MariaDB dumps.
         
         Args:
             sql_content: SQL file content
@@ -120,9 +120,9 @@ class BackupVerifier:
         if len(sql_content) < 100:
             return False
         
-        # Required patterns for valid MySQL dump
+        # Required patterns for valid MySQL/MariaDB dump
         required_patterns = [
-            r"-- MySQL dump",
+            r"-- (MySQL|MariaDB) dump",  # Accept both MySQL and MariaDB headers
             r"CREATE TABLE",
             r"INSERT INTO"
         ]
@@ -498,7 +498,7 @@ class BackupStorage:
             ValueError: If no valid timestamp found
         """
         # Expected format: sitename_type_YYYY-MM-DD_HH-MM-SS.tar.gz
-        pattern = r'\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}'
+        pattern = r'\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}'
         match = re.search(pattern, filename)
         if match:
             return match.group(0)

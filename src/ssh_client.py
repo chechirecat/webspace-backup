@@ -241,9 +241,16 @@ class SSHClient:
             
             self.logger.info(f"Creating database dump: {db_config['db_name']}")
             self.logger.debug(f"Mysqldump command: {mysqldump_cmd}")
+            
+            # Execute mysqldump with detailed logging
             exit_code, stdout, stderr = self.execute_command(mysqldump_cmd, timeout=600)
             
+            self.logger.debug(f"Mysqldump exit code: {exit_code}")
+            self.logger.debug(f"Mysqldump stdout: {stdout}")
+            self.logger.debug(f"Mysqldump stderr: {stderr}")
+            
             if exit_code != 0:
+                self.logger.error(f"Mysqldump failed with exit code {exit_code}")
                 self.logger.error(f"Mysqldump stderr: {stderr}")
                 self.logger.error(f"Mysqldump stdout: {stdout}")
                 raise RemoteOperationError(f"mysqldump failed (exit {exit_code}): {stderr}")
@@ -253,25 +260,34 @@ class SSHClient:
             exit_code, stdout, stderr = self.execute_command(check_cmd)
             
             if exit_code != 0:
+                self.logger.error(f"Dump file not found: {stderr}")
                 raise RemoteOperationError(f"Database dump file not created: {stderr}")
             
             self.logger.debug(f"Dump file info: {stdout}")
             
-            # Check file size more precisely
+            # Check file size and content
             size_check = stdout.strip().split()
             if len(size_check) >= 5:
                 file_size = size_check[4]
+                self.logger.debug(f"Dump file size: {file_size} bytes")
+                
                 if file_size == "0":
-                    # Try to get more info about why the file is empty
+                    # File is empty - this is the problem!
                     head_cmd = f"head -n 5 {remote_dump_file}"
                     _, head_out, _ = self.execute_command(head_cmd)
                     self.logger.error(f"Empty dump file content: '{head_out}'")
                     raise RemoteOperationError("Database dump file is empty")
                 else:
-                    # File has content, let's see what's in it
-                    head_cmd = f"head -n 10 {remote_dump_file}"
+                    # File has content, let's see what's in it to debug the verification issue
+                    head_cmd = f"head -n 20 {remote_dump_file}"
                     _, head_out, _ = self.execute_command(head_cmd)
-                    self.logger.debug(f"Dump file preview (first 10 lines): {head_out}")
+                    self.logger.debug(f"Dump file preview (first 20 lines):")
+                    self.logger.debug(f"{head_out}")
+                    
+                    # Specifically check for MySQL dump header
+                    if "-- MySQL dump" not in head_out:
+                        self.logger.error(f"Dump file missing MySQL header. Content starts with:")
+                        self.logger.error(f"{head_out[:200]}...")
             else:
                 # Fallback check
                 if "0 " in stdout:  # File size is 0
@@ -335,24 +351,19 @@ class SSHClient:
         user_param = f"--user={db_config['db_user']}"
         
         # Handle password (might be empty)
+        password_param = ""
         if db_config.get('db_password'):
-            # Use MYSQL_PWD environment variable for safer password handling
-            password_setup = f"MYSQL_PWD='{db_config['db_password']}'"
-            password_param = ""
-        else:
-            password_setup = ""
-            password_param = "--password=''"
+            # Use --password parameter directly - safer than MYSQL_PWD in some environments
+            password_param = f"--password='{db_config['db_password']}'"
         
-        # Build complete command
+        # Build complete command parts
         cmd_parts = [base_cmd] + options + [host_param, user_param]
         if password_param:
             cmd_parts.append(password_param)
         cmd_parts.append(db_config['db_name'])
         
-        if password_setup:
-            command = f"{password_setup} {' '.join(cmd_parts)} > {output_file}"
-        else:
-            command = f"{' '.join(cmd_parts)} > {output_file}"
+        # Build final command with output redirection
+        command = f"{' '.join(cmd_parts)} > {output_file}"
         
         return command
     
